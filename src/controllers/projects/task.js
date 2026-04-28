@@ -200,8 +200,6 @@ exports.create = async (req, res) => {
 
       await req.db.query(assigneeSql, [assigneeValues]);
     }
-
-    console.log("Test ");
     await req.db.commit();
     const [newTaskRows] = await req.db.query(
       "SELECT * FROM tasks WHERE task_hash = ?",
