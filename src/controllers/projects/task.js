@@ -219,8 +219,7 @@ exports.update = async (req, res) => {
   let dueDate = req.body.due_date;
   let priority = req.body.priority;
   let statusIds = req.body.status_id;
-  let assigneeIds = req.body.assignee_id;
-
+  let assigneeIds = req.body.assignee_user_id;
   const { projectId, taskId } = req.params;
   const userId = req.user_id;
 

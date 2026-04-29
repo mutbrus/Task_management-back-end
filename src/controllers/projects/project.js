@@ -111,69 +111,92 @@ exports.getList = async (req, res) => {
 }
 
 exports.update = async (req, res) => {
-    const { hash } = req.params;
+    const { projectId } = req.params;
     const { pj_name, description } = req.body;
 
-    if(!pj_name && description === undefined) return res.json(req.f.json.fail('Missing field required'));
+    if (!projectId || isNaN(parseInt(projectId, 10))) {
+        return res.json(req.f.json.fail('A valid Project ID is required in the URL.'));
+    }
+
+    if (!pj_name && description === undefined) {
+        return res.json(req.f.json.fail('Missing field required'));
+    }
 
     try {
         const updateFields = [];
         const queryValues = [];
 
-        if(pj_name) {
+        if (pj_name) {
             updateFields.push('pj_name = ?');
             queryValues.push(pj_name);
         }
-        if(description) {
+
+        if (description !== undefined) {
             updateFields.push('description = ?');
             queryValues.push(description);
         }
 
         updateFields.push('updated_at = NOW()');
-        const setClause = updateFields.join(', ');
-        queryValues.push(hash);
 
-        const sql = `UPDATE projects SET ${setClause} WHERE pj_hash = ?;`;
+        const setClause = updateFields.join(', ');
+        queryValues.push(projectId);
+
+        const sql = `UPDATE projects SET ${setClause} WHERE project_id = ?`;
 
         await req.db.query(sql, queryValues);
-        const [result] = await req.db.query('SELECT * FROM projects WHERE pj_hash = ?', [hash]);
-        
-        if(result.length === 0) return res.json(req.f.json.fail('Project not found.'));
-        const newProject = result[0];
-        return res.json(req.f.json.success(newProject));
+
+        const [result] = await req.db.query(
+            'SELECT * FROM projects WHERE project_id = ?',
+            [projectId]
+        );
+
+        if (result.length === 0) {
+            return res.json(req.f.json.fail('Project not found.'));
+        }
+
+        return res.json(req.f.json.success(result[0]));
     } catch (err) {
         console.error('Database error', err);
         return res.json(req.f.json.error('Database Error'));
     }
-}
+};
 
 exports.delete = async (req, res) => {
-    const { hash } = req.params;
+    const { projectId } = req.params;
     const userId = req.user_id;
 
-    await req.db.beginTransaction();
-    try {
-        const [proRow] = await req.db.query('SELECT project_id, owner_id FROM projects WHERE pj_hash = ? FOR UPDATE;', [hash]);
+    if (!projectId || isNaN(parseInt(projectId, 10))) {
+        return res.json(req.f.json.fail('A valid Project ID is required in the URL.'));
+    }
 
-        if(proRow === 0) {
+    await req.db.beginTransaction();
+
+    try {
+        const [proRow] = await req.db.query(
+            'SELECT project_id, owner_id FROM projects WHERE project_id = ? FOR UPDATE;',
+            [projectId]
+        );
+
+        if (proRow.length === 0) {
             await req.db.rollback();
             return res.json(req.f.json.fail('Project not found'));
         }
 
         const project = proRow[0];
-        const projectId = project.project_id;
+
         if (project.owner_id !== userId) {
             await req.db.rollback();
             return res.json(req.f.json.fail('Permission Denied: You are not the owner of this project'));
         }
 
-        const [taskRows] = await req.db.query('SELECT task_id FROM tasks WHERE project_id = ?',
+        const [taskRows] = await req.db.query(
+            'SELECT task_id FROM tasks WHERE project_id = ?',
             [projectId]
         );
 
         const taskIds = taskRows.map(t => t.task_id);
-        // console.log({taskIds})
-        if(taskIds.length > 0) {
+
+        if (taskIds.length > 0) {
             await req.db.query('DELETE FROM comments WHERE task_id IN (?)', [taskIds]);
             await req.db.query('DELETE FROM attachments WHERE task_id IN (?)', [taskIds]);
             await req.db.query('DELETE FROM task_dependencies WHERE task_id IN (?) OR depend_on_task_id IN (?)', [taskIds, taskIds]);
@@ -184,12 +207,14 @@ exports.delete = async (req, res) => {
         await req.db.query('DELETE FROM tasks WHERE project_id = ?', [projectId]);
         await req.db.query('DELETE FROM activity_log WHERE project_id = ?', [projectId]);
         await req.db.query('DELETE FROM project_members WHERE project_id = ?', [projectId]);
+        await req.db.query('DELETE FROM projects WHERE project_id = ?', [projectId]);
+
         await req.db.commit();
 
-        return res.json(req.f.json.success('Project delete successfully'));
+        return res.json(req.f.json.success('Project deleted successfully'));
     } catch (err) {
         await req.db.rollback();
         console.error('Database error: ', err);
         return res.json(req.f.json.error('Database error'));
     }
-}
+};
